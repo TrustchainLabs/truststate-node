@@ -18,6 +18,7 @@ import type {
   BatchResult,
   CheckItem,
   ComplianceResult,
+  EvidenceItem,
   TrustStateClientOptions,
 } from "./types.js";
 
@@ -137,6 +138,144 @@ export class TrustStateClient {
    * @returns The full record object from the API.
    * @throws TrustStateError on HTTP 4xx/5xx.
    */
+  // ---------------------------------------------------------------------------
+  // BYOP Evidence fetch helpers
+  // ---------------------------------------------------------------------------
+
+  /** Fetch an FX rate oracle evidence item.
+   * @example
+   * const fx = await client.fetchFxRate("MYR", "USD");
+   * const result = await client.checkWithEvidence("SukukBond", data, [fx]);
+   */
+  async fetchFxRate(
+    fromCurrency: string,
+    toCurrency: string,
+    providerId = "reuters-fx",
+    maxAgeSeconds = 300,
+  ): Promise<EvidenceItem> {
+    const subject = { from: fromCurrency, to: toCurrency };
+    if (this.mock) {
+      const stubs: Record<string, number> = { MYR_USD: 0.2119, USD_MYR: 4.72, EUR_USD: 1.085, GBP_USD: 1.267 };
+      return this.makeEvidenceItem(providerId, "fx_rate", subject, stubs[`${fromCurrency}_${toCurrency}`] ?? 1.0, maxAgeSeconds);
+    }
+    const data: any = await this.get(`/v1/oracle/fx-rate?from=${fromCurrency}&to=${toCurrency}&providerId=${providerId}`);
+    return this.parseEvidenceResponse(data, providerId, "fx_rate", subject, maxAgeSeconds);
+  }
+
+  /** Fetch a KYC status oracle evidence item. */
+  async fetchKycStatus(
+    subjectId: string,
+    providerId = "sumsub-kyc",
+    maxAgeSeconds = 86400,
+  ): Promise<EvidenceItem> {
+    const subject = { id: subjectId };
+    if (this.mock) {
+      return this.makeEvidenceItem(providerId, "kyc_status", subject, "PASS", maxAgeSeconds);
+    }
+    const data: any = await this.get(`/v1/oracle/kyc-status?subjectId=${subjectId}&providerId=${providerId}`);
+    return this.parseEvidenceResponse(data, providerId, "kyc_status", subject, maxAgeSeconds);
+  }
+
+  /** Fetch a credit score oracle evidence item. */
+  async fetchCreditScore(
+    subjectId: string,
+    providerId = "coface-credit",
+    maxAgeSeconds = 86400,
+  ): Promise<EvidenceItem> {
+    const subject = { id: subjectId };
+    if (this.mock) {
+      return this.makeEvidenceItem(providerId, "credit_score", subject, 720, maxAgeSeconds);
+    }
+    const data: any = await this.get(`/v1/oracle/credit-score?subjectId=${subjectId}&providerId=${providerId}`);
+    return this.parseEvidenceResponse(data, providerId, "credit_score", subject, maxAgeSeconds);
+  }
+
+  /** Fetch a sanctions screening oracle evidence item. */
+  async fetchSanctions(
+    subjectId: string,
+    providerId = "refinitiv-sanct",
+    maxAgeSeconds = 3600,
+  ): Promise<EvidenceItem> {
+    const subject = { id: subjectId };
+    if (this.mock) {
+      return this.makeEvidenceItem(providerId, "sanctions", subject, "CLEAR", maxAgeSeconds);
+    }
+    const data: any = await this.get(`/v1/oracle/sanctions?subjectId=${subjectId}&providerId=${providerId}`);
+    return this.parseEvidenceResponse(data, providerId, "sanctions", subject, maxAgeSeconds);
+  }
+
+  /** Submit a compliance check with oracle evidence attached.
+   * @example
+   * const fx = await client.fetchFxRate("MYR", "USD");
+   * const result = await client.checkWithEvidence("SukukBond", payload, [fx]);
+   */
+  async checkWithEvidence(
+    entityType: string,
+    data: Record<string, unknown>,
+    evidence: EvidenceItem[],
+    options: { action?: string; entityId?: string; schemaVersion?: string; actorId?: string } = {},
+  ): Promise<ComplianceResult> {
+    if (this.mock) return this.mockSingleResult(options.entityId ?? crypto.randomUUID());
+    const entityId = options.entityId ?? crypto.randomUUID();
+    const schemaVersion = options.schemaVersion ?? this.defaultSchemaVersion;
+    const actorId = options.actorId ?? this.defaultActorId;
+    const response = await this.post("/v1/write/batch", {
+      records: [{
+        entityType,
+        data,
+        action: options.action ?? "CREATE",
+        entityId,
+        schemaVersion,
+        actorId,
+        evidence,
+      }],
+    });
+    return this.parseBatchResponse(response).results[0];
+  }
+
+  private makeEvidenceItem(
+    providerId: string,
+    providerType: string,
+    subject: Record<string, unknown>,
+    observedValue: string | number,
+    maxAgeSeconds: number,
+  ): EvidenceItem {
+    const now = new Date().toISOString();
+    return {
+      evidenceId:     crypto.randomUUID(),
+      providerId,
+      providerType,
+      subject,
+      observedValue,
+      observedAt:     now,
+      retrievedAt:    now,
+      maxAgeSeconds,
+      mock:           true,
+    };
+  }
+
+  private parseEvidenceResponse(
+    data: any,
+    defaultProviderId: string,
+    providerType: string,
+    subject: Record<string, unknown>,
+    maxAgeSeconds: number,
+  ): EvidenceItem {
+    return {
+      evidenceId:     crypto.randomUUID(),
+      providerId:     data.providerId ?? defaultProviderId,
+      providerType,
+      subject,
+      observedValue:  data.observedValue,
+      observedAt:     data.observedAt,
+      retrievedAt:    new Date().toISOString(),
+      maxAgeSeconds,
+      proofHash:      data.proofHash,
+      rawProofUri:    data.rawProofUri,
+      attestation:    data.attestation,
+    };
+  }
+
   async verify(recordId: string, bearerToken: string): Promise<unknown> {
     const url = `${this.baseUrl}/v1/records/${recordId}`;
     const controller = new AbortController();
@@ -169,6 +308,29 @@ export class TrustStateClient {
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  private async get(path: string): Promise<Record<string, unknown>> {
+    const url = `${this.baseUrl}${path}`;
+    const controller = new AbortController();
+    const timerId = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        headers: { "X-API-Key": this.apiKey },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      throw new TrustStateError(`Network error: ${(err as Error).message}`);
+    } finally {
+      clearTimeout(timerId);
+    }
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new TrustStateError(`API error ${response.status}: ${body}`, response.status);
+    }
+    return response.json() as Promise<Record<string, unknown>>;
+  }
 
   private async post(
     path: string,

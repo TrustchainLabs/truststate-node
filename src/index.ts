@@ -17,6 +17,7 @@ export type {
   BatchResult,
   CheckItem,
   ComplianceResult,
+  EvidenceItem,
   TrustStateClientOptions,
 } from "./types.js";
 export type { TrustStateMiddlewareOptions } from "./middleware.js";

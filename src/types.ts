@@ -52,6 +52,34 @@ export interface CheckItem {
   actorId?: string;
 }
 
+/** A single oracle evidence item to submit alongside a compliance write. */
+export interface EvidenceItem {
+  /** Unique ID for this evidence item. Auto-generated if not set. */
+  evidenceId: string;
+  /** Registered oracle provider ID (e.g. "reuters-fx"). */
+  providerId: string;
+  /** Oracle provider type (e.g. "fx_rate", "kyc_status"). */
+  providerType: string;
+  /** Key-value subject descriptor (e.g. { from: "MYR", to: "USD" }). */
+  subject: Record<string, unknown>;
+  /** The oracle-reported value. */
+  observedValue: string | number;
+  /** ISO-8601 timestamp when the value was observed by the oracle. */
+  observedAt: string;
+  /** ISO-8601 timestamp when you fetched this value. Defaults to now. */
+  retrievedAt: string;
+  /** Maximum acceptable age of this evidence in seconds. Default 300. */
+  maxAgeSeconds: number;
+  /** Optional sha256:<hex> hash of the raw proof document. */
+  proofHash?: string;
+  /** Optional URL for the raw proof document (background verified by TrustState). */
+  rawProofUri?: string;
+  /** Optional cryptographic attestation from the oracle provider. */
+  attestation?: { type: string; algorithm: string; signature: string };
+  /** True when synthesised locally in mock mode. */
+  mock?: boolean;
+}
+
 /** Constructor options for TrustStateClient. */
 export interface TrustStateClientOptions {
   /** Your TrustState API key (sent as X-API-Key header). */
