@@ -16,6 +16,8 @@ export interface ComplianceResult {
   failReason?: string;
   /** Numeric step that failed. 8 = schema validation, 9 = policy check. */
   failedStep?: number;
+  /** Feed label from the batch request — useful for identifying source feeds. */
+  feedLabel?: string | null;
   /** True when this result was synthesised locally in mock mode (no HTTP call). */
   mock: boolean;
 }
@@ -32,6 +34,8 @@ export interface BatchResult {
   rejected: number;
   /** Per-item results in the same order as the submitted items. */
   results: ComplianceResult[];
+  /** Feed label echoed from the batch request. */
+  feedLabel?: string | null;
   /** True when running in mock mode (no HTTP calls made). */
   mock: boolean;
 }
@@ -80,13 +84,26 @@ export interface EvidenceItem {
   mock?: boolean;
 }
 
+/** Options for check_batch / checkBatch. */
+export interface BatchOptions {
+  /** Optional label identifying this feed/source (e.g. "core-banking-feed"). */
+  feedLabel?: string;
+  /** Override default schema version for this batch. */
+  defaultSchemaVersion?: string;
+  /** Override default actor ID for this batch. */
+  defaultActorId?: string;
+}
+
 /** Constructor options for TrustStateClient. */
 export interface TrustStateClientOptions {
   /** Your TrustState API key (sent as X-API-Key header). */
   apiKey: string;
   /** Override the default API base URL. */
   baseUrl?: string;
-  /** Default schema version applied when not specified per-call. */
+  /**
+   * Default schema version applied when not specified per-call.
+   * If omitted, the server auto-resolves to the active schema for each entity type.
+   */
   defaultSchemaVersion?: string;
   /** Default actor ID for the audit trail. */
   defaultActorId?: string;

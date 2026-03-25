@@ -107,26 +107,37 @@ export class TrustStateClient {
     options: {
       defaultSchemaVersion?: string;
       defaultActorId?: string;
+      /** Label identifying this feed/source — echoed back on every item result. */
+      feedLabel?: string;
     } = {}
   ): Promise<BatchResult> {
     const schemaVer = options.defaultSchemaVersion ?? this.defaultSchemaVersion;
     const actor = options.defaultActorId ?? this.defaultActorId;
 
     // Normalise items — assign missing entity IDs and fill defaults
-    const normalised = items.map((item) => ({
-      entityType: item.entityType,
-      data: item.data,
-      action: item.action ?? "CREATE",
-      entityId: item.entityId ?? crypto.randomUUID(),
-      schemaVersion: item.schemaVersion ?? schemaVer,
-      actorId: item.actorId ?? actor,
-    }));
+    const normalised = items.map((item) => {
+      const entry: Record<string, unknown> = {
+        entityType: item.entityType,
+        data: item.data,
+        action: item.action ?? "upsert",
+        entityId: item.entityId ?? crypto.randomUUID(),
+        actorId: item.actorId ?? actor ?? "sdk-writer",
+      };
+      const sv = item.schemaVersion ?? schemaVer;
+      if (sv) entry.schemaVersion = sv;
+      return entry;
+    });
 
     if (this.mock) {
-      return this.mockBatchResult(normalised);
+      return this.mockBatchResult(normalised, options.feedLabel);
     }
 
-    const responseJson = await this.post("/v1/write/batch", { records: normalised });
+    const payload: Record<string, unknown> = { items: normalised };
+    if (schemaVer) payload.defaultSchemaVersion = schemaVer;
+    if (actor) payload.defaultActorId = actor;
+    if (options.feedLabel) payload.feedLabel = options.feedLabel;
+
+    const responseJson = await this.post("/v1/write/batch", payload);
     return this.parseBatchResponse(responseJson);
   }
 
@@ -219,17 +230,16 @@ export class TrustStateClient {
     const entityId = options.entityId ?? crypto.randomUUID();
     const schemaVersion = options.schemaVersion ?? this.defaultSchemaVersion;
     const actorId = options.actorId ?? this.defaultActorId;
-    const response = await this.post("/v1/write/batch", {
-      records: [{
-        entityType,
-        data,
-        action: options.action ?? "CREATE",
-        entityId,
-        schemaVersion,
-        actorId,
-        evidence,
-      }],
-    });
+    const item: Record<string, unknown> = {
+      entityType,
+      data,
+      action: options.action ?? "upsert",
+      entityId,
+      actorId: actorId ?? "sdk-writer",
+      evidence,
+    };
+    if (schemaVersion) item.schemaVersion = schemaVersion;
+    const response = await this.post("/v1/write/batch", { items: [item] });
     return this.parseBatchResponse(response).results[0];
   }
 
@@ -370,15 +380,20 @@ export class TrustStateClient {
 
   private parseBatchResponse(data: Record<string, unknown>): BatchResult {
     const rawResults = (data.results as Record<string, unknown>[]) ?? [];
-    const results: ComplianceResult[] = rawResults.map((r) => ({
-      passed: Boolean(r.passed),
-      recordId: r.recordId as string | undefined,
-      requestId: (r.requestId as string) ?? "",
-      entityId: (r.entityId as string) ?? "",
-      failReason: r.failReason as string | undefined,
-      failedStep: r.failedStep as number | undefined,
-      mock: false,
-    }));
+    const results: ComplianceResult[] = rawResults.map((r) => {
+      // Batch API returns status: 'accepted' | 'rejected'
+      const passed = r.status === "accepted";
+      return {
+        passed,
+        recordId: r.recordId as string | undefined,
+        requestId: (r.requestId as string) ?? "",
+        entityId: (r.entityId as string) ?? "",
+        failReason: r.failReason as string | undefined,
+        failedStep: r.failedStep as number | undefined,
+        feedLabel: (r.feedLabel as string | null) ?? null,
+        mock: false,
+      };
+    });
 
     const accepted = results.filter((r) => r.passed).length;
 
@@ -388,6 +403,7 @@ export class TrustStateClient {
       accepted: (data.accepted as number) ?? accepted,
       rejected: (data.rejected as number) ?? results.length - accepted,
       results,
+      feedLabel: (data.feedLabel as string | null) ?? null,
       mock: false,
     };
   }
@@ -410,11 +426,13 @@ export class TrustStateClient {
   }
 
   private mockBatchResult(
-    normalisedItems: Array<{ entityId: string }>
+    normalisedItems: Array<{ entityId: string }>,
+    feedLabel?: string
   ): BatchResult {
-    const results = normalisedItems.map((item) =>
-      this.mockSingleResult(item.entityId)
-    );
+    const results = normalisedItems.map((item) => ({
+      ...this.mockSingleResult(item.entityId),
+      feedLabel: feedLabel ?? null,
+    }));
     const accepted = results.filter((r) => r.passed).length;
 
     return {
@@ -423,6 +441,7 @@ export class TrustStateClient {
       accepted,
       rejected: results.length - accepted,
       results,
+      feedLabel: feedLabel ?? null,
       mock: true,
     };
   }
