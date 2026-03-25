@@ -1,393 +1,230 @@
-# TrustState JavaScript / TypeScript SDK
+# TrustState Node.js / TypeScript SDK
 
-[![npm](https://img.shields.io/badge/npm-%40truststate%2Fsdk-red)](https://github.com/jasimp18/truststate-js)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue)](https://www.typescriptlang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![TrustState API](https://img.shields.io/badge/TrustState-API%20v1-green)](https://truststate-api.apps.trustchainlabs.com)
+[![npm version](https://img.shields.io/npm/v/@truststate/sdk.svg)](https://www.npmjs.com/package/@truststate/sdk)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-TypeScript/JavaScript SDK for **[TrustState](https://trustchainlabs.com)** — real-time compliance validation, policy enforcement, and immutable audit trails for AI agents, financial systems, and automated workflows.
+TypeScript/JavaScript SDK for the [TrustState](https://truststate.apps.trustchainlabs.com) compliance API — validate, audit, and enforce compliance rules on any entity or data record. Built for financial services, AI governance, and regulated industries.
 
-**Zero runtime dependencies.** Uses native `fetch` and `crypto` (Node 18+, all modern browsers).
-
----
-
-## What is TrustState?
-
-TrustState is a compliance infrastructure platform. It lets you define **schemas** (what your data must look like) and **policies** (what rules it must follow), then validate any event or decision against them in real time — with cryptographic proof of every check.
-
-Use it to:
-- Ensure AI agent outputs comply with your SOPs before delivery
-- Validate financial transactions against regulatory rules
-- Prove that every decision in an automated workflow was checked and logged
-
----
-
-## Installation
+## Install
 
 ```bash
-# Install from GitHub (npm package coming soon)
-npm install github:jasimp18/truststate-js
-
-# Or with yarn
-yarn add github:jasimp18/truststate-js
+npm install @truststate/sdk
+# or
+yarn add @truststate/sdk
 ```
 
-Or clone and use locally:
-```bash
-git clone https://github.com/jasimp18/truststate-js.git
-cd truststate-js
-npm install
-npm run build
-```
+Requires Node.js 18+ (uses native `fetch` and `crypto.randomUUID()`).
 
-**Requirements:** Node 18+ (for native fetch and crypto.randomUUID)
-
----
-
-## Getting an API Key
-
-1. Log in to your TrustState dashboard at [tstate.apps.trustchainlabs.com](https://tstate.apps.trustchainlabs.com)
-2. Go to **Settings → API Keys**
-3. Click **New API Key**, give it a label (e.g. `"My AI Agent"`)
-4. Copy the key — it is shown **only once**
-
----
-
-## Quick Start
+## Quickstart
 
 ```typescript
-import { TrustStateClient } from '@truststate/sdk';
+import { TrustStateClient } from "@truststate/sdk";
 
-const ts = new TrustStateClient({ apiKey: 'ts_your_key_here' });
+const client = new TrustStateClient({ apiKey: "ts_your_api_key" });
 
-const result = await ts.check('AgentResponse', {
-  responseText: 'Your loan application is under review.',
-  confidenceScore: 0.92,
-  disclaimer: 'This is not financial advice.',
-  language: 'en'
+const result = await client.check("SukukBond", {
+  id: "BOND-001",
+  issuerId: "ISS-001",
+  currency: "MYR",
+  faceValue: 5_000_000,
+  maturityDate: "2030-06-01",
+  status: "DRAFT",
 });
 
 if (result.passed) {
-  console.log('✅ Compliant — Record ID:', result.recordId);
+  console.log("✅ Passed — record ID:", result.recordId);
 } else {
-  console.log('❌ Blocked —', result.failReason);
+  console.log("❌ Failed —", result.failReason, `(step ${result.failedStep})`);
 }
 ```
 
-**CommonJS:**
-```javascript
-const { TrustStateClient } = require('@truststate/sdk');
-```
+## Batch Writes
 
----
-
-## Core Concepts
-
-Before using the SDK, set up your schema and policy in the TrustState dashboard:
-
-| Concept | What it is | Example |
-|---|---|---|
-| **Entity Type** | The name for the type of data you're validating | `AgentResponse`, `Transaction` |
-| **Schema** | Defines the required fields and their types | `confidenceScore` must be a number |
-| **Policy** | Defines the business rules | `confidenceScore` must be ≥ 0.7 |
-| **Record** | A passed validation — cryptographically signed | Stored in Registry |
-| **Violation** | A failed validation | Stored in Violations log |
-
----
-
-## Usage
-
-### 1. Single check
+Submit multiple records in a single API call. Useful for feed-based pipelines.
 
 ```typescript
-import { TrustStateClient } from '@truststate/sdk';
-
-const ts = new TrustStateClient({
-  apiKey: 'ts_your_key_here',
-  baseUrl: 'https://truststate-api.apps.trustchainlabs.com',  // default
-  defaultSchemaVersion: '1.0',
-  defaultActorId: 'agent-001',
-  timeoutMs: 30000,
-});
-
-const result = await ts.check(
-  'AgentResponse',
-  {
-    responseText: 'Here is your account summary.',
-    confidenceScore: 0.88,
-    disclaimer: 'For informational purposes only.',
-    language: 'en'
-  },
-  {
-    action: 'CREATE',                   // optional, defaults to CREATE
-    entityId: 'session-abc-turn-1',    // optional, auto-generated if omitted
-    schemaVersion: '1.0',               // optional, uses defaultSchemaVersion
-    actorId: 'agent-001',              // optional, uses defaultActorId
-  }
-);
-
-console.log(result.passed);      // true / false
-console.log(result.recordId);   // "3fa85f64-..." (if passed)
-console.log(result.failReason); // "Policy: min-confidence violated" (if failed)
-console.log(result.failedStep); // 8 (schema) or 9 (policy)
-```
-
-### 2. Batch check
-
-Submit multiple items in a single call — efficient for high-volume agents or transaction feeds.
-
-```typescript
-const batch = await ts.checkBatch(
+const result = await client.checkBatch(
   [
-    {
-      entityType: 'AgentResponse',
-      data: { responseText: '...', confidenceScore: 0.9, disclaimer: '...', language: 'en' },
-      entityId: 'session-001-turn-1'
-    },
-    {
-      entityType: 'AgentResponse',
-      data: { responseText: '...', confidenceScore: 0.4, disclaimer: '...', language: 'en' },
-      entityId: 'session-002-turn-1'
-    }
+    { entityType: "SukukBond", data: { id: "BOND-001", ... } },
+    { entityType: "SukukBond", data: { id: "BOND-002", ... } },
+    { entityType: "SukukBond", data: { id: "BOND-003", ... } },
   ],
   {
-    defaultSchemaVersion: '1.0',
-    defaultActorId: 'agent-batch'
+    feedLabel: "core-banking-feed",  // echoed on every item result
   }
 );
 
-console.log(`Batch: ${batch.accepted}/${batch.total} passed`);
-
-for (const r of batch.results) {
-  const icon = r.passed ? '✅' : '❌';
-  console.log(`  ${icon} ${r.entityId} — ${r.failReason ?? r.recordId}`);
-}
-```
-
-### 3. Verify a past record
-
-Retrieve and verify a previously submitted record by its ID:
-
-```typescript
-const proof = await ts.verify(
-  '3fa85f64-5717-4562-b3fc-2c963f66afa6',
-  'your_jwt_bearer_token'
-);
-console.log(proof);
-```
-
----
-
-## Express Middleware
-
-Automatically validate request bodies against TrustState before they reach your route handler.
-
-```typescript
-import express from 'express';
-import { TrustStateClient, trustStateMiddleware } from '@truststate/sdk';
-
-const app = express();
-const ts = new TrustStateClient({ apiKey: 'ts_your_key_here' });
-
-app.use(express.json());
-
-// Apply to a specific route
-app.post(
-  '/agent/respond',
-  trustStateMiddleware(ts, {
-    entityType: 'AgentResponse',
-    action: 'CREATE',
-    onFail: 'block',  // returns 422 if compliance fails
-  }),
-  (req, res) => {
-    // TrustState has already validated req.body
-    // complianceResult is attached to req.truststate
-    const { recordId } = req.truststate;
-    res.json({ status: 'ok', recordId });
-  }
-);
-```
-
-**`onFail` options:**
-
-| Value | Behaviour |
-|---|---|
-| `"block"` (default) | Returns HTTP 422 with violation details |
-| `"warn"` | Logs a warning, continues to route handler |
-| `"pass"` | Silently continues regardless of result |
-
----
-
-## Next.js Route Handler Wrapper
-
-```typescript
-// app/api/agent/respond/route.ts  (Next.js 13+ App Router)
-import { TrustStateClient, withCompliance } from '@truststate/sdk';
-import { NextRequest, NextResponse } from 'next/server';
-
-const ts = new TrustStateClient({ apiKey: process.env.TRUSTSTATE_API_KEY! });
-
-export const POST = withCompliance(ts, 'AgentResponse', async (req: NextRequest) => {
-  const body = await req.json();
-  // Compliance already validated — body is safe to use
-  return NextResponse.json({ status: 'ok' });
+console.log(`Accepted: ${result.accepted}/${result.total}`);
+result.results.forEach((item) => {
+  console.log(`  ${item.entityId}: ${item.passed ? "✅" : "❌"} ${item.feedLabel}`);
 });
 ```
 
-**Pages Router (`/pages/api`):**
+## BYOP Evidence (Oracle Data)
+
+Attach oracle evidence to compliance checks — FX rates, KYC status, credit scores, sanctions screening.
+
 ```typescript
-import { withComplianceLegacy } from '@truststate/sdk';
+// Fetch evidence from registered oracle providers
+const fx    = await client.fetchFxRate("MYR", "USD");
+const kyc   = await client.fetchKycStatus("actor-jasim");
+const score = await client.fetchCreditScore("actor-jasim");
 
-export default withComplianceLegacy(ts, 'AgentResponse', async (req, res) => {
-  res.json({ status: 'ok' });
-});
+// Submit with evidence attached
+const result = await client.checkWithEvidence(
+  "SukukBond",
+  { id: "BOND-001", issuerId: "ISS-001", currency: "MYR", faceValue: 5_000_000 },
+  [fx, kyc, score],
+);
 ```
-
----
 
 ## Mock Mode
 
-Develop and test without connecting to the TrustState API. Zero network calls.
+Test without making any API calls. Useful for unit tests and local development.
 
 ```typescript
-const ts = new TrustStateClient({
-  apiKey: '',
+const client = new TrustStateClient({
+  apiKey: "any",
   mock: true,
-  mockPassRate: 1.0   // 1.0 = always pass, 0.0 = always fail, 0.8 = 80% pass
+  mockPassRate: 0.8,   // 80% of checks will pass
 });
 
-const result = await ts.check('AgentResponse', { responseText: 'Test' });
-console.log(result.passed); // true
+const result = await client.check("SukukBond", { id: "TEST-001", ... });
 console.log(result.mock);   // true
 ```
 
-**Auto-mock in tests:**
+## Express Middleware
+
+Automatically validate incoming request bodies against TrustState policies.
+
 ```typescript
-const ts = new TrustStateClient({
-  apiKey: process.env.TRUSTSTATE_API_KEY ?? '',
-  mock: !process.env.TRUSTSTATE_API_KEY,  // mock if no key set
-  mockPassRate: 1.0
+import express from "express";
+import { TrustStateMiddleware } from "@truststate/sdk";
+
+const app = express();
+
+app.use(
+  TrustStateMiddleware({
+    apiKey: "ts_your_api_key",
+    entityType: "AgentResponse",
+    extractData: (req) => req.body,
+  })
+);
+```
+
+## Configuration
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `apiKey` | `string` | required | Your TrustState API key |
+| `baseUrl` | `string` | production URL | Override the API base URL |
+| `defaultSchemaVersion` | `string` | auto-resolved | Schema version (auto-resolved by server if omitted) |
+| `defaultActorId` | `string` | `""` | Actor ID for the audit trail |
+| `mock` | `boolean` | `false` | Enable mock mode (no HTTP calls) |
+| `mockPassRate` | `number` | `1.0` | Pass probability in mock mode (0.0–1.0) |
+| `timeoutMs` | `number` | `30000` | HTTP timeout in milliseconds |
+
+## API Reference
+
+### `check(entityType, data, options?)`
+
+Submit a single record for compliance checking.
+
+```typescript
+const result = await client.check("SukukBond", data, {
+  action: "upsert",
+  entityId: "BOND-001",
+  schemaVersion: "1.0",
+  actorId: "core-banking-feed",
 });
 ```
 
----
+Returns: `Promise<ComplianceResult>`
 
-## Error Handling
+### `checkBatch(items, options?)`
+
+Submit up to 500 records in a single call.
 
 ```typescript
-import { TrustStateClient, TrustStateError } from '@truststate/sdk';
+const result = await client.checkBatch(items, {
+  feedLabel: "core-banking-feed",
+  defaultActorId: "core-banking-feed",
+});
+```
 
-const ts = new TrustStateClient({ apiKey: 'ts_your_key_here' });
+Returns: `Promise<BatchResult>`
 
-try {
-  const result = await ts.check('AgentResponse', data);
+### `checkWithEvidence(entityType, data, evidence, options?)`
 
-  if (!result.passed) {
-    // Validation ran, but data failed policy/schema
-    console.log('Step:', result.failedStep); // 8 = schema, 9 = policy
-    console.log('Reason:', result.failReason);
-  }
-} catch (e) {
-  if (e instanceof TrustStateError) {
-    // HTTP-level error (auth failure, network issue, server error)
-    console.error(`TrustState [${e.statusCode}]: ${e.message}`);
-  }
+Submit a record with oracle evidence attached.
+
+Returns: `Promise<ComplianceResult>`
+
+### `fetchFxRate(from, to, options?)`
+### `fetchKycStatus(subjectId, options?)`
+### `fetchCreditScore(subjectId, options?)`
+### `fetchSanctions(subjectId, options?)`
+
+Fetch oracle evidence items from registered providers.
+
+Returns: `Promise<EvidenceItem>`
+
+### `verify(recordId, bearerToken)`
+
+Retrieve an immutable compliance record from the ledger.
+
+Returns: `Promise<Record<string, unknown>>`
+
+## Types
+
+### `ComplianceResult`
+
+```typescript
+interface ComplianceResult {
+  passed: boolean;
+  recordId?: string;       // present when passed=true
+  requestId: string;
+  entityId: string;
+  failReason?: string;     // present when passed=false
+  failedStep?: number;     // 8=schema validation, 9=policy check
+  feedLabel?: string | null;
+  mock: boolean;
 }
 ```
 
-**`failedStep` values:**
-
-| Step | Meaning |
-|---|---|
-| `8` | Schema validation failed — data shape/type is wrong |
-| `9` | Policy evaluation failed — data violated a business rule |
-
----
-
-## TypeScript Types
+### `BatchResult`
 
 ```typescript
-import type {
-  TrustStateClientOptions,
-  ComplianceResult,
-  BatchResult,
-  CheckItem,
-} from '@truststate/sdk';
-
-const options: TrustStateClientOptions = {
-  apiKey: 'ts_...',
-  mock: false,
-  defaultSchemaVersion: '1.0',
-};
-
-const result: ComplianceResult = await ts.check('AgentResponse', data);
+interface BatchResult {
+  batchId: string;
+  total: number;
+  accepted: number;
+  rejected: number;
+  results: ComplianceResult[];
+  feedLabel?: string | null;
+  mock: boolean;
+}
 ```
 
----
+### `CheckItem`
 
-## Running the Examples
-
-```bash
-git clone https://github.com/jasimp18/truststate-js.git
-cd truststate-js
-npm install
-npm run build
-
-# AI agent demo (uses mock mode if no API key set)
-export TRUSTSTATE_API_KEY="ts_your_key"
-npx ts-node examples/ai-agent-demo.ts
-
-# Batch transaction feed
-npx ts-node examples/batch-feed.ts
+```typescript
+interface CheckItem {
+  entityType: string;
+  data: Record<string, unknown>;
+  action?: string;           // default "upsert"
+  entityId?: string;         // auto-generated if omitted
+  schemaVersion?: string;    // auto-resolved if omitted
+  actorId?: string;
+}
 ```
 
----
+## Requirements
 
-## Running Tests
-
-```bash
-npm test
-```
-
----
-
-## Environment Variables
-
-| Variable | Description | Default |
-|---|---|---|
-| `TRUSTSTATE_API_KEY` | Your TrustState API key | — |
-| `TRUSTSTATE_BASE_URL` | API base URL (override for self-hosted) | `https://truststate-api.apps.trustchainlabs.com` |
-
----
-
-## API Compatibility
-
-| SDK Version | TrustState API |
-|---|---|
-| `0.1.x` | API v1 |
-
----
-
-## Roadmap
-
-- [ ] Publish to npm as `@truststate/sdk`
-- [ ] Schema caching (avoid re-fetching on every call)
-- [ ] LangChain callback handler
-- [ ] OpenAI function call interceptor
-- [ ] Deno support
-- [ ] Browser bundle (ESM)
-
----
-
-## Links
-
-- **TrustState Platform:** [tstate.apps.trustchainlabs.com](https://tstate.apps.trustchainlabs.com)
-- **API Reference:** [truststate-api.apps.trustchainlabs.com/docs](https://truststate-api.apps.trustchainlabs.com/docs)
-- **Python SDK:** [github.com/jasimp18/truststate-py](https://github.com/jasimp18/truststate-py)
-- **TrustChain Labs:** [trustchainlabs.com](https://trustchainlabs.com)
-
----
+- Node.js 18+
+- No external runtime dependencies (uses native `fetch`, `crypto`)
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT © Trustchain Labs
