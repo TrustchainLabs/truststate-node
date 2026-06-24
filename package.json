@@ -20,6 +20,8 @@
   ],
   "scripts": {
     "build": "tsc",
+    "build:all": "npm run build -w @hsuite/smart-engines-shared && npm run build -w @hsuite/smart-engines-sdk && npm run build",
+    "prepare": "npm run build:all",
     "test": "jest",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit"
