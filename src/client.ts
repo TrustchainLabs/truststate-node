@@ -70,11 +70,7 @@ export class TrustStateClient {
   ): Promise<ComplianceResult> {
     const entityId = options.entityId ?? crypto.randomUUID();
 
-    // Enforce actorId presence: either per-item or via defaultActorId/default configured on the client
-    const missing = normalised.filter((e) => !e.actorId);
-    if (missing.length > 0) {
-      throw new TrustStateError('actorId is required for all writes. Provide actorId per-item or set defaultActorId when constructing the client.', 400);
-    }
+    // actorId enforcement happens in checkBatch() below, which this method delegates to.
 
     if (this.mock) {
       return this.mockSingleResult(entityId);
